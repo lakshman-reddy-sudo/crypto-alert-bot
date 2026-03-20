@@ -47,4 +47,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
     CMD curl -sf http://localhost:8080/health || exit 1
 
 # Use exec form so SIGTERM reaches Python directly (not wrapped in shell)
-ENTRYPOINT ["python", "-u", "bot.py"]
+CMD ["sh", "-c", "python migrations/migrate.py && python -u bot.py"]
