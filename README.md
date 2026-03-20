@@ -1,95 +1,43 @@
 # 🤖 Crypto Price Alert Discord Bot
 
-A production-ready, fully async Discord bot for real-time crypto price
-alerts — powered by **Binance WebSocket**, **discord.py v2 slash commands**,
-**asyncpg + Supabase (PostgreSQL)**, auto-deployed to **Railway** via
-**GitHub Actions**. Zero installs on your PC. Push to GitHub → bot updates itself.
+A production-ready, fully async Discord bot for real-time crypto price alerts —
+powered by **Binance WebSocket**, **discord.py v2 slash commands**, and deployed
+on **Render**. Zero database. Zero polling. Pure event-driven.
 
 ---
 
-## 📁 Complete File Structure
+## 💡 Why I Built This
 
-```
-crypto-alert-bot/
-│
-├── 🤖 Core Bot
-│   ├── bot.py                        Entry point, lifecycle, signal handling
-│   ├── alerts.py                     In-memory AlertCache + crossover logic
-│   ├── data.py                       asyncpg pool, schema, all DB queries
-│   ├── price_stream.py               Binance WebSocket, reconnect, alert queue
-│   ├── config.py                     All env vars validated at startup
-│   └── healthcheck.py                /health  /ready  /metrics  HTTP server
-│
-├── 📂 cogs/
-│   ├── __init__.py
-│   └── alert_commands.py             All 6 slash commands as a discord.py Cog
-│
-├── 📂 migrations/
-│   ├── migrate.py                    Versioned SQL migration runner
-│   ├── 0001_initial_schema.sql       Creates alerts table + indexes
-│   └── 0002_add_paused_column.sql    Adds pause/resume support
-│
-├── 📂 tests/
-│   ├── __init__.py
-│   ├── conftest.py                   Shared fixtures, env stubs
-│   ├── test_crossover.py             40+ crossover logic unit tests
-│   └── test_cache.py                 AlertCache async unit tests
-│
-├── 📂 .github/
-│   ├── PULL_REQUEST_TEMPLATE.md
-│   └── workflows/
-│       ├── ci.yml                    Lint + test on every push
-│       └── deploy.yml                Auto-deploy to Railway on push to main
-│
-├── 📄 Documentation
-│   ├── README.md                     ← you are here
-│   ├── DEPLOY.md                     Full deployment guide (GitHub + Railway)
-│   ├── BOT_COMMANDS.md               How to use all bot commands
-│   └── SUPABASE_CONNECTION_GUIDE.md  Step-by-step Supabase setup
-│
-├── 🐳 Docker / Infra
-│   ├── Dockerfile                    Multi-stage production image
-│   ├── docker-compose.yml            Bot + optional Prometheus + Grafana
-│   ├── prometheus.yml                Prometheus scrape config
-│   └── railway.toml                  Railway deployment config
-│
-└── ⚙️ Config
-    ├── requirements.txt
-    ├── pytest.ini
-    ├── Makefile
-    ├── .env.example                  All supported environment variables
-    ├── .gitignore
-    └── .dockerignore
-```
+I was paper trading crypto and forex on a brokerage platform that capped me at
+**20 price alerts**. That's not enough when you're watching multiple pairs across
+different timeframes.
+
+So I built my own — unlimited alerts, instant crossover detection, and a clean
+Discord interface I can use from anywhere.
 
 ---
 
 ## ⚡ How It Works
 
 ```
-Binance !miniTicker@arr WebSocket  ←  single global stream, all symbols
+Binance !miniTicker@arr WebSocket   ←   single stream, ALL symbols (~2000+)
         │
         ▼  (every ~1 second, per symbol)
   price_stream.py
-  └── _handle_ticker_update()        NO I/O — pure in-memory check
-          └── check_crossover()      Decimal math, zero side effects
+  └── _handle_ticker_update()       pure in-memory check, zero I/O
+          └── check_crossover()     Decimal math, no side effects
                   │
           (price crossed target)
-                  ▼
+                  ↓
           asyncio.Queue  →  Discord channel.send()
-                             rate-limited to 10 msg/sec
+                             rate-limited to 5 msg/sec
 
-  alerts.py  AlertCache              symbol → alert_id → alert dict
-             Lock on writes          Lock-free on hot-path reads
-
-  data.py    asyncpg pool            DB writes ONLY on:
-             ssl=require               create / delete / trigger / pause
-
-  config.py  Settings                All env vars, validated at import
-  healthcheck.py                     /health  /ready  /metrics
+  AlertCache                        symbol → alert_id → alert dict
+  asyncio.Lock on writes            lock-free on hot-path reads
 ```
 
 **Crossover logic** — alerts only fire when price *crosses* the target, not just touches it:
+
 ```
 last_price < target  AND  current >= target  →  fires ABOVE
 last_price > target  AND  current <= target  →  fires BELOW
@@ -108,7 +56,7 @@ last_price > target  AND  current <= target  →  fires BELOW
 | `/alert pause id` | Suspend an alert without deleting it |
 | `/alert resume id` | Re-activate a paused alert |
 
-**Symbol format:** Binance pair name, no separators — `BTCUSDT`, `ETHUSDT`, `SOLUSDT`
+**Symbol format:** Any Binance pair — `BTCUSDT`, `ETHUSDT`, `SOLUSDT`, `XAUUSDT`
 
 **Direction choices:**
 - `Above target price` — fires when price rises through your target
@@ -117,136 +65,100 @@ last_price > target  AND  current <= target  →  fires BELOW
 
 **Repeat flag:** if `True`, re-fires every 5 minutes instead of deleting after first trigger.
 
-> Full command guide with examples → **`BOT_COMMANDS.md`**
+---
+
+## 📡 What Binance Provides
+
+| Feature | Detail |
+|---|---|
+| WebSocket stream | `!miniTicker@arr` — all symbols, ~1s updates |
+| Symbols available | ~2000+ trading pairs |
+| REST endpoint | `/api/v3/ticker/price` — used for startup price sync |
+| Connection limit | 300 WebSocket connections per IP (this bot uses 1) |
+| REST weight | 4 per full ticker fetch — well within 1200/min limit |
+| Cost | Completely free — no API key needed for market data |
 
 ---
 
-## 🚀 Deployment (Zero Local Install)
+## 🏗️ Architecture
 
-Every push to `main` automatically:
-1. Runs lint + all unit tests
-2. Builds Docker image → pushes to GitHub Container Registry
-3. Deploys to Railway
-4. Health-checks `/ready` before marking deploy live
-
-You only need a browser. Nothing installs on your PC.
-
-> Full step-by-step guide → **`DEPLOY.md`**
-> Supabase connection string guide → **`SUPABASE_CONNECTION_GUIDE.md`**
+```
+crypto-alert-bot/
+├── bot.py                 Entry point, lifecycle, signal handling
+├── alerts.py              In-memory AlertCache + crossover logic
+├── price_stream.py        Binance WebSocket, reconnect, alert queue
+├── config.py              All env vars validated at startup
+├── healthcheck.py         /health  /ready  /metrics  HTTP server
+├── cogs/
+│   └── alert_commands.py  All 6 slash commands
+├── Dockerfile
+├── render.yaml
+└── requirements.txt
+```
 
 ---
 
-## 🔑 Required GitHub Secrets
+## 🚀 Deploy to Render (5 minutes)
 
-Go to: **GitHub repo → Settings → Secrets and variables → Actions**
+1. Fork this repo
+2. Go to [render.com](https://render.com) → New → **Web Service**
+3. Connect your GitHub repo
+4. Set `DISCORD_TOKEN` in the Environment tab
+5. Deploy — bot is online in ~2 minutes
 
-| Secret | Where to get it |
+**Required environment variable:**
+
+| Variable | Where to get it |
 |---|---|
 | `DISCORD_TOKEN` | Discord Developer Portal → Your App → Bot → Reset Token |
-| `SUPABASE_DB_URL` | Supabase → Project Settings → Database → URI tab → Session mode (port 5432) |
-| `RAILWAY_TOKEN` | Railway → Account Settings → Tokens → New Token |
 
-Optional secrets (all have sensible defaults):
+**Optional:**
 
-| Secret | Default | Description |
+| Variable | Default | Description |
 |---|---|---|
-| `DEV_GUILD_ID` | (empty) | Your server ID for instant command sync during dev |
-| `REPEAT_COOLDOWN_SECS` | `300` | Seconds between repeat alert fires |
+| `DEV_GUILD_ID` | (empty) | Your server ID for instant slash command sync |
 | `MAX_ALERTS_PER_USER` | `50` | Per-user alert cap |
-| `LOG_FORMAT` | `json` | `json` for Railway, `text` for local dev |
-| `LOG_LEVEL` | `INFO` | `DEBUG` for verbose logs |
+| `REPEAT_COOLDOWN_SECS` | `300` | Seconds between repeat alert fires |
+| `BINANCE_WS_URL` | Binance vision URL | Override if geo-blocked |
+| `LOG_LEVEL` | `INFO` | Set to `DEBUG` for verbose logs |
 
 ---
 
-## 📋 One-Time Setup Checklist
+## 🔑 Discord Bot Setup
 
-- [ ] **1. Fork / push repo to GitHub**
-- [ ] **2. Create Discord bot** — Developer Portal → New Application → Bot → copy token
-- [ ] **3. Invite bot to server** — OAuth2 → URL Generator → scopes: `bot` + `applications.commands` → permissions: Send Messages, Embed Links, Read Message History
-- [ ] **4. Create Supabase project** — free tier, copy Session mode URI (port 5432)
-- [ ] **5. Create Railway project** — connect GitHub repo, copy Railway token
-- [ ] **6. Add 3 GitHub Secrets** — `DISCORD_TOKEN`, `SUPABASE_DB_URL`, `RAILWAY_TOKEN`
-- [ ] **7. Push to main** — triggers first auto-deploy (~5 min)
-- [ ] **8. Run migrations** — Railway shell → `python migrations/migrate.py`
-- [ ] **9. Verify** — bot appears online in Discord, try `/alert add`
+1. Go to [discord.com/developers/applications](https://discord.com/developers/applications)
+2. New Application → Bot → copy token
+3. OAuth2 → URL Generator → scopes: `bot` + `applications.commands`
+4. Permissions: `Send Messages`, `Embed Links`, `Read Message History`
+5. Invite bot to your server with the generated URL
 
 ---
 
 ## 🩺 Health Endpoints
 
-Once deployed, Railway exposes these at your service URL:
-
-| Endpoint | Returns 200 when... | Use for |
-|---|---|---|
-| `/health` | Process is alive | Docker liveness probe |
-| `/ready` | Discord + DB + WS + cache all up | Docker readiness probe |
-| `/metrics` | Always | Prometheus scraping |
-
-```bash
-# Check if bot is fully ready
-curl https://your-service.railway.app/ready
-
-# Response when everything is healthy:
-# {"ready": true, "components": {"discord": true, "database": true, "websocket": true, "cache": true}, "uptime_seconds": 3600.0}
-```
+| Endpoint | Returns 200 when... |
+|---|---|
+| `/health` | Process is alive |
+| `/ready` | Discord connected + Binance WS active |
+| `/metrics` | Always (Prometheus format) |
 
 ---
 
-## 🧪 Running Tests Locally
-
-Tests are fully in-memory — no real Discord, DB, or Binance connection needed.
-
-```bash
-# Install deps
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Run all tests
-pytest tests/ -v
-
-# With coverage
-pytest tests/ -v --cov=. --cov-report=term-missing
-```
-
----
-
-## 🗃️ Database Migrations
-
-```bash
-# See what's been applied
-python migrations/migrate.py --status
-
-# Apply pending migrations
-python migrations/migrate.py
-
-# Preview without applying
-python migrations/migrate.py --dry-run
-```
-
-To add a new migration, create a file in `migrations/`:
-```
-migrations/0003_your_description.sql
-```
-It will be picked up and applied automatically on next run.
-
----
-
-## 💰 Running Costs
+## 💰 Running Cost
 
 | Service | Cost |
 |---|---|
-| GitHub Actions | Free (2,000 min/month on free plan) |
-| Railway Hobby | ~$5/month (bot uses ~100MB RAM, near-zero CPU) |
-| Supabase Free | $0 (500MB storage, handles tens of thousands of alerts) |
-| **Total** | **~$5/month** |
+| Render Web Service | Free tier / ~$7/month paid |
+| Binance market data | Free (no API key needed) |
+| Discord bot | Free |
+| **Total** | **$0 on free tier** |
 
 ---
 
-## 📚 Read Next
+## 🛠️ Tech Stack
 
-| File | What's in it |
-|---|---|
-| `DEPLOY.md` | Full 9-part deployment walkthrough, troubleshooting, rollback guide |
-| `BOT_COMMANDS.md` | Every command explained with examples, FAQ, common mistakes |
-| `SUPABASE_CONNECTION_GUIDE.md` | Exactly how to get your DB connection string, step by step |
+- **Python 3.12**
+- **discord.py v2** — slash commands, embeds
+- **aiohttp** — async WebSocket + REST
+- **uvloop** — 2x faster event loop on Linux
+- **Render** — deployment platform
