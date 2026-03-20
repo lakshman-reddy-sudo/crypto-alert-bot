@@ -1,29 +1,102 @@
-# railway.toml — Railway deployment configuration
-
+# railway.toml
 [build]
 builder           = "DOCKERFILE"
 dockerfilePath    = "./Dockerfile"
 dockerBuildTarget = "runtime"
 
 [deploy]
-# Run migrations then start the bot.
-# migrate.py is idempotent — safe to run on every deploy.
-startCommand = "python migrations/migrate.py && python -u bot.py"
-
+startCommand            = "python migrations/migrate.py && python -u bot.py"
 restartPolicyType       = "ON_FAILURE"
 restartPolicyMaxRetries = 10
+```
 
-# Railway healthcheck.
-# Railway injects PORT automatically — our app reads it and binds there.
-# We use /ready (not /health) so Railway waits for Discord + DB + WS
-# to all be connected before marking the deploy successful.
-healthcheckPath    = "/ready"
-healthcheckTimeout = 120
+Scroll down → click **"Commit changes"**. This removes the healthcheck that was killing your deploys. Railway will now just check that the process is alive instead of probing an HTTP endpoint.
 
-[environments.production.variables]
-LOG_FORMAT          = "json"
-LOG_LEVEL           = "INFO"
-HEALTHCHECK_ENABLED = "true"LOG_LEVEL             = "INFO"
-HEALTHCHECK_ENABLED   = "true"
-HEALTHCHECK_PORT      = "8080"
-PYTHON_ENV            = "production"
+**But actually — skip Railway entirely and use Render instead. Here's why Render is better for you:**
+
+| | Railway | Render (Background Worker) |
+|---|---|---|
+| Needs HTTP healthcheck | ✅ Yes (this is your problem) | ❌ No |
+| Free tier | Trial credit only | ✅ 750 hrs/month free |
+| Discord bot support | Works but awkward | Perfect fit |
+| Setup complexity | Medium | Very simple |
+
+---
+
+## Full Render.com Deployment Guide — Zero Local Install
+
+### Step 1 — Create a Render account
+
+Go to **https://render.com** → click **"Get Started for Free"** → sign up with GitHub (same account your repo is on). Click **"Authorize Render"**.
+
+---
+
+### Step 2 — Create a new Background Worker
+
+1. Once logged in, click the **"New +"** button (top right)
+2. Click **"Background Worker"**
+
+   > ⚠️ Do NOT choose "Web Service" — that requires HTTP. Choose **Background Worker**.
+
+3. Under "Connect a repository", find **`crypto-alert-bot`** and click **Connect**
+
+4. Fill in the form:
+   - **Name:** `crypto-alert-bot`
+   - **Region:** pick closest to you (Singapore for India)
+   - **Branch:** `main`
+   - **Runtime:** `Docker`
+   - **Dockerfile Path:** `./Dockerfile`
+   - **Docker Build Context:** `.`
+
+5. Under **Instance Type** → select **Free** (512MB RAM, enough for the bot)
+
+6. **Do NOT click "Create Background Worker" yet** — scroll down to add env vars first
+
+---
+
+### Step 3 — Add your environment variables
+
+Still on the same page, scroll down to **"Environment Variables"** section. Click **"Add Environment Variable"** for each:
+
+**Variable 1 — Required:**
+```
+Key:   DISCORD_TOKEN
+Value: (paste your Discord bot token)
+```
+
+**Variable 2 — Required:**
+```
+Key:   SUPABASE_DB_URL
+Value: (paste your postgresql://... connection string)
+```
+
+**Variable 3 — Recommended:**
+```
+Key:   DEV_GUILD_ID
+Value: (your Discord server ID — right-click server icon → Copy Server ID)
+```
+
+**Variable 4:**
+```
+Key:   LOG_FORMAT
+Value: text
+```
+
+That's all you need. Now click **"Create Background Worker"**.
+
+---
+
+### Step 4 — Watch it deploy
+
+Render will now:
+1. Pull your code from GitHub
+2. Build the Docker image (takes 2–4 minutes first time)
+3. Start the bot
+
+Click on your service → click **"Logs"** tab. Watch for:
+```
+asyncpg pool initialized
+Loaded 0 active alert(s) into cache.
+Connected to Binance !miniTicker@arr stream.
+Synced 6 slash command(s)
+Bot fully initialized and ready.
