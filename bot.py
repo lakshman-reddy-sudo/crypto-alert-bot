@@ -3,11 +3,11 @@ bot.py — Discord bot entry point and orchestration layer.
 
 Responsibilities:
   - Bootstrap logging and settings validation
-  - Initialize DB pool, AlertCache, PriceStream, HealthServer
-  - Load the AlertCommands Cog (where all /alert commands live)
+  - Initialize AlertCache, PriceStream, HealthServer
+  - Load the AlertCommands Cog
   - Coordinate startup sequence and graceful shutdown
 
-All slash commands live in cogs/alert_commands.py.
+No database. No migrations. Starts in ~2 seconds.
 """
 
 import asyncio
@@ -17,13 +17,12 @@ import signal
 import discord
 from discord.ext import commands
 
-import data
 from alerts import AlertCache
 from config import configure_logging, settings
 from healthcheck import HealthServer
 from price_stream import PriceStream
 
-# Bootstrap logging immediately — before any other imports log anything
+# Bootstrap logging immediately — before any other module logs anything
 configure_logging()
 logger = logging.getLogger(__name__)
 
@@ -33,10 +32,12 @@ logger = logging.getLogger(__name__)
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
+
 cache = AlertCache()
 health = HealthServer()
 
 _price_stream: PriceStream | None = None
+_initialized: bool = False  # Guard against on_ready firing multiple times
 
 
 # ---------------------------------------------------------------------------
@@ -45,49 +46,52 @@ _price_stream: PriceStream | None = None
 
 @bot.event
 async def on_ready() -> None:
-    global _price_stream
+    global _price_stream, _initialized
 
+    # on_ready can fire more than once (e.g. after a Discord reconnect).
+    # Only run the full init sequence once.
+    if _initialized:
+        logger.info("on_ready fired again (reconnect) — skipping re-init.")
+        return
+
+    _initialized = True
     logger.info("Logged in as %s (ID: %s).", bot.user, bot.user.id)
 
-    # 1. DB pool + schema
-    await data.init_db()
-    health.set_db_ready()
+    # 1. Register cache size function with health server
+    health.set_cache_size_fn(lambda: cache.total_alerts)
 
-    # 2. Load active alerts into in-memory cache
-    all_alerts = await data.load_all_active_alerts()
-    await cache.load(all_alerts)
-    health.set_cache_loaded(size_fn=lambda: cache.total_alerts)
-    logger.info("Loaded %d active alert(s) into cache.", cache.total_alerts)
-
-    # 3. Instantiate PriceStream
+    # 2. Instantiate PriceStream
     _price_stream = PriceStream(cache, bot, health)
 
-    # 4. Load the AlertCommands Cog
+    # 3. Load the AlertCommands Cog (imports here to avoid circular imports)
     from cogs.alert_commands import AlertCommands
-    if not bot.cogs.get("AlertCommands"):
-        await bot.add_cog(AlertCommands(bot, cache, _price_stream))
+    await bot.add_cog(AlertCommands(bot, cache, _price_stream))
 
-    # 5. Sync slash commands
+    # 4. Sync slash commands
     if settings.dev_guild_id:
         guild_obj = discord.Object(id=settings.dev_guild_id)
         bot.tree.copy_global_to(guild=guild_obj)
         synced = await bot.tree.sync(guild=guild_obj)
         logger.info(
             "Dev mode: synced %d command(s) to guild %d.",
-            len(synced), settings.dev_guild_id,
+            len(synced),
+            settings.dev_guild_id,
         )
     else:
         synced = await bot.tree.sync()
         logger.info("Synced %d slash command(s) globally.", len(synced))
 
-    # 6. Initial REST price resync — fire alerts missed while offline
+    # 5. Fetch baseline prices from Binance REST so crossover logic has
+    #    a last_price to compare against from the very first WS tick.
+    #    (Cache is empty at startup so this is a no-op if no alerts exist yet.)
     await _price_stream.resync_prices()
 
-    # 7. Start WebSocket supervisor + notification queue
+    # 6. Start WebSocket supervisor + notification queue
     await _price_stream.start()
 
-    # 8. Mark Discord ready — /ready probe returns 200 from here on
+    # 7. Mark Discord ready — /ready probe returns 200 from here on
     health.set_discord_ready()
+
     logger.info("Bot fully initialized and ready.")
 
 
@@ -96,7 +100,6 @@ async def on_close() -> None:
     logger.info("Bot shutting down...")
     if _price_stream:
         await _price_stream.stop()
-    await data.close_db()
     await health.stop()
 
 
