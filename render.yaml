@@ -1,0 +1,35 @@
+# render.yaml — Render deployment configuration
+#
+# Deploy type: Web Service (not Background Worker)
+# Reason: We run a health HTTP server that Render needs to ping.
+# Render injects PORT automatically — our healthcheck server binds to it.
+#
+# Setup steps:
+#   1. Push this repo to GitHub
+#   2. Go to render.com → New → Web Service
+#   3. Connect your GitHub repo
+#   4. Render auto-detects this file
+#   5. Set DISCORD_TOKEN in the Environment tab
+#   6. Deploy
+
+services:
+  - type: web
+    name: crypto-alert-bot
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false           # Set manually in Render dashboard
+      - key: DEV_GUILD_ID
+        sync: false           # Optional: your server ID for instant command sync
+      - key: MAX_ALERTS_PER_USER
+        value: "50"
+      - key: REPEAT_COOLDOWN_SECS
+        value: "300"
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: LOG_FORMAT
+        value: "text"
+      - key: HEALTHCHECK_ENABLED
+        value: "true"
