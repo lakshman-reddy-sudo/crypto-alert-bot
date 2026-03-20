@@ -1,0 +1,35 @@
+# ── Required ─────────────────────────────────────────────────────────────────
+DISCORD_TOKEN=your_discord_bot_token_here
+
+# ── Optional — Discord ────────────────────────────────────────────────────────
+# Your server ID for instant slash command sync during development.
+# Leave blank for global sync (takes up to 1 hour to propagate).
+DEV_GUILD_ID=
+
+# ── Optional — Alert Logic ────────────────────────────────────────────────────
+MAX_ALERTS_PER_USER=50
+REPEAT_COOLDOWN_SECS=300
+
+# ── Optional — Binance ───────────────────────────────────────────────────────
+# These are already set to the correct production values.
+# Only override if you know what you're doing.
+# BINANCE_WS_URL=wss://stream.binance.com:9443/ws/!miniTicker@arr
+# BINANCE_REST_URL=https://api.binance.com/api/v3/ticker/price
+# WS_HEARTBEAT_SECS=20
+# WS_READ_TIMEOUT_SECS=60
+# WS_RECONNECT_BASE_DELAY=5
+# WS_RECONNECT_MAX_DELAY=120
+
+# ── Optional — Discord Rate Limiting ─────────────────────────────────────────
+DISCORD_MAX_MSG_PER_SEC=5
+DISCORD_429_BACKOFF_SECS=5.0
+
+# ── Optional — Healthcheck ────────────────────────────────────────────────────
+# Render injects PORT automatically — no need to set this.
+# HEALTHCHECK_PORT=8080
+HEALTHCHECK_ENABLED=true
+
+# ── Optional — Logging ────────────────────────────────────────────────────────
+LOG_LEVEL=INFO
+# Use "json" for structured logging in production (Datadog, Loki, etc.)
+LOG_FORMAT=text
