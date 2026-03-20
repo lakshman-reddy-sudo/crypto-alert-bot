@@ -1,23 +1,12 @@
-# Secrets — NEVER commit these
 .env
-*.env
-
-# Python
 __pycache__/
-*.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-htmlcov/
-.coverage
-coverage.xml
-
-# Virtual environment
+*.pyc
+*.pyo
 .venv/
 venv/
-
-# Editor
-.idea/
-.vscode/
-*.swp
-.DS_Store
+dist/
+build/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
