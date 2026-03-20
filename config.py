@@ -4,6 +4,12 @@ config.py — Single source of truth for all runtime configuration.
 All env vars are validated at import time. If a required var is missing,
 the process exits immediately with a clear error message rather than
 crashing somewhere deep in the stack later.
+
+Railway note:
+  Railway automatically injects a PORT environment variable into every
+  service. Our healthcheck server MUST listen on that port or Railway's
+  probe will get "connection refused" and mark the deploy as failed.
+  Priority order: PORT (Railway) → HEALTHCHECK_PORT → 8080
 """
 
 import os
@@ -20,7 +26,7 @@ def _require(key: str) -> str:
     if not value:
         print(
             f"\n[FATAL] Missing required environment variable: {key}\n"
-            f"        Copy .env.example → .env and fill in the value.\n",
+            f"        Set it in Railway → your service → Variables tab.\n",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -31,6 +37,19 @@ def _optional(key: str, default: str) -> str:
     return os.environ.get(key, default).strip()
 
 
+def _healthcheck_port() -> int:
+    """
+    Railway injects PORT automatically. We must bind to it or the
+    healthcheck probe gets 'connection refused' and the deploy fails.
+    Priority: PORT (Railway injects this) → HEALTHCHECK_PORT → 8080
+    """
+    for key in ("PORT", "HEALTHCHECK_PORT"):
+        val = os.environ.get(key, "").strip()
+        if val.isdigit():
+            return int(val)
+    return 8080
+
+
 # ---------------------------------------------------------------------------
 # Settings dataclass (populated once at module import)
 # ---------------------------------------------------------------------------
@@ -39,28 +58,25 @@ def _optional(key: str, default: str) -> str:
 class Settings:
     # ── Discord ──────────────────────────────────────────────────────────
     discord_token: str
-
-    # Optional: if set, slash commands are synced to this guild instantly.
-    # Leave blank for global sync (up to 1-hour propagation).
     dev_guild_id: int | None
 
     # ── Database ─────────────────────────────────────────────────────────
     supabase_db_url: str
     db_min_pool: int
     db_max_pool: int
-    db_command_timeout: int  # seconds
+    db_command_timeout: int
 
     # ── Binance ───────────────────────────────────────────────────────────
     binance_ws_url: str
     binance_rest_url: str
     ws_heartbeat_secs: int
     ws_read_timeout_secs: int
-    ws_reconnect_base_delay: float   # seconds, doubles on each retry
+    ws_reconnect_base_delay: float
     ws_reconnect_max_delay: float
 
     # ── Alert logic ───────────────────────────────────────────────────────
-    repeat_cooldown_secs: int         # 5 minutes default
-    max_alerts_per_user: int          # safety cap
+    repeat_cooldown_secs: int
+    max_alerts_per_user: int
 
     # ── Discord rate limiting ─────────────────────────────────────────────
     discord_max_msg_per_sec: int
@@ -68,12 +84,12 @@ class Settings:
 
     # ── Health check ─────────────────────────────────────────────────────
     healthcheck_host: str
-    healthcheck_port: int
+    healthcheck_port: int       # binds to Railway's PORT automatically
     healthcheck_enabled: bool
 
     # ── Logging ───────────────────────────────────────────────────────────
     log_level: str
-    log_format: str = field(default="json")   # "json" | "text"
+    log_format: str = field(default="text")
 
 
 def _load() -> Settings:
@@ -112,9 +128,9 @@ def _load() -> Settings:
         # Discord rate limiting
         discord_max_msg_per_sec=int(_optional("DISCORD_MAX_MSG_PER_SEC", "10")),
         discord_429_backoff_secs=float(_optional("DISCORD_429_BACKOFF_SECS", "5.0")),
-        # Healthcheck
+        # Healthcheck — reads Railway's PORT automatically
         healthcheck_host=_optional("HEALTHCHECK_HOST", "0.0.0.0"),
-        healthcheck_port=int(_optional("HEALTHCHECK_PORT", "8080")),
+        healthcheck_port=_healthcheck_port(),
         healthcheck_enabled=hc_enabled,
         # Logging
         log_level=_optional("LOG_LEVEL", "INFO").upper(),
@@ -131,11 +147,6 @@ settings: Settings = _load()
 # ---------------------------------------------------------------------------
 
 def configure_logging() -> None:
-    """
-    Set up root logger. If LOG_FORMAT=json, emit structured JSON lines
-    (useful for Datadog / Loki log ingestion). Otherwise use a readable
-    text format for local development.
-    """
     handlers: list[logging.Handler] = []
 
     if settings.log_format == "json":
@@ -155,7 +166,6 @@ def configure_logging() -> None:
         level=getattr(logging, settings.log_level, logging.INFO),
         handlers=handlers,
     )
-    # Silence noisy third-party loggers
     logging.getLogger("discord.gateway").setLevel(logging.WARNING)
     logging.getLogger("asyncpg").setLevel(logging.WARNING)
     logging.getLogger("aiohttp.access").setLevel(logging.WARNING)
