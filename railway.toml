@@ -1,0 +1,40 @@
+# railway.toml — Railway deployment configuration
+#
+# Railway reads this file from the repo root to understand how to
+# build and run your service. You don't need to configure anything
+# in the Railway dashboard that's already set here.
+#
+# Docs: https://docs.railway.app/reference/config-as-code
+
+[build]
+# Use the Dockerfile in the repo root.
+# Railway auto-detects it, but being explicit is safer.
+builder          = "DOCKERFILE"
+dockerfilePath   = "./Dockerfile"
+dockerBuildTarget = "runtime"    # use the slim runtime stage, not the builder
+
+[deploy]
+# Command to run inside the container.
+# Matches the Dockerfile ENTRYPOINT — explicit here for clarity.
+startCommand = "python -u bot.py"
+
+# Railway will restart the container if it exits unexpectedly.
+restartPolicyType   = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+# Health check — Railway polls this to know if the deploy succeeded.
+# Must match HEALTHCHECK_PORT (default 8080).
+# Railway uses /ready (not /health) so it waits for full bot init.
+healthcheckPath    = "/ready"
+healthcheckTimeout = 120    # seconds — gives Discord + DB time to connect
+
+[environments.production]
+# Environment-specific overrides for the production Railway environment.
+# Secrets (DISCORD_TOKEN, SUPABASE_DB_URL) are set via GitHub Actions
+# or the Railway dashboard — NOT stored here.
+[environments.production.variables]
+LOG_FORMAT            = "json"
+LOG_LEVEL             = "INFO"
+HEALTHCHECK_ENABLED   = "true"
+HEALTHCHECK_PORT      = "8080"
+PYTHON_ENV            = "production"
