@@ -1,0 +1,14 @@
+# ── Runtime ──────────────────────────────────────────────────────────────────
+discord.py>=2.3.2
+aiohttp>=3.9.0
+asyncpg>=0.29.0
+
+# Optional but strongly recommended on Linux/macOS — ~2x faster event loop
+uvloop>=0.19.0
+
+# Optional — enables LOG_FORMAT=json structured logging for Datadog/Loki
+json-log-formatter>=0.5.2
+
+# ── Development / Testing ────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
